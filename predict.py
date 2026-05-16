@@ -1,12 +1,12 @@
 from CONST import LABEL_LIST
 import torch
-from transformers import BertTokenizerFast, BertForTokenClassification
+from transformers import BertJapaneseTokenizer, BertForTokenClassification
 
 MODEL_DIR = "./trained_model"
 
 
 def predict(text):
-    tokenizer = BertTokenizerFast.from_pretrained(MODEL_DIR)
+    tokenizer = BertJapaneseTokenizer.from_pretrained(MODEL_DIR)
     model = BertForTokenClassification.from_pretrained(MODEL_DIR)
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model.to(device)

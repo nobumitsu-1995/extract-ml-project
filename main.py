@@ -1,13 +1,14 @@
 from CONST import LABEL_MAP, TRAIN_DATA, LABEL_LIST
+from extract import align_token_offsets
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import AdamW
-from transformers import BertTokenizerFast, BertForTokenClassification
+from transformers import BertJapaneseTokenizer, BertForTokenClassification
 
 MODEL_NAME = "cl-tohoku/bert-base-japanese-v3"
 MODEL_DIR = "./trained_model"
 
-# 1. 実践的なDatasetクラス
+
 class SESExtractionDataset(Dataset):
     def __init__(self, data, tokenizer, max_length=128):
         self.data = data
@@ -21,7 +22,6 @@ class SESExtractionDataset(Dataset):
         item = self.data[idx]
         text = item["text"]
 
-        # 1文字ごとのラベル配列を初期化
         char_labels = ["O"] * len(text)
         for sub_text, label in item["labels"]:
             start = text.find(sub_text)
@@ -30,25 +30,36 @@ class SESExtractionDataset(Dataset):
                 for i in range(start + 1, start + len(sub_text)):
                     char_labels[i] = f"I-{label}"
 
-        # トークナイズ（offset_mappingで文字とトークンを紐付け）
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
             padding='max_length',
             truncation=True,
-            return_offsets_mapping=True,
             return_tensors="pt"
         )
+        input_ids = encoding['input_ids'].squeeze().tolist()
+
+        raw_tokens = self.tokenizer.tokenize(text)
+        offsets = align_token_offsets(text, raw_tokens)
+
+        special_ids = {self.tokenizer.cls_token_id, self.tokenizer.sep_token_id, self.tokenizer.pad_token_id}
 
         labels = []
-        offsets = encoding['offset_mapping'].squeeze().tolist()
-
-        for start, end in offsets:
-            if start == end:  # [CLS], [SEP], [PAD] など
+        token_idx = 0
+        for tid in input_ids:
+            if tid in special_ids:
                 labels.append(-100)
-            else:
-                # トークンの開始位置の文字ラベルを採用
+                continue
+            if token_idx >= len(offsets) or offsets[token_idx] is None:
+                labels.append(0)
+                token_idx += 1
+                continue
+            start, _ = offsets[token_idx]
+            token_idx += 1
+            if start < len(char_labels):
                 labels.append(LABEL_MAP.get(char_labels[start], 0))
+            else:
+                labels.append(0)
 
         return {
             'input_ids': encoding['input_ids'].squeeze(),
@@ -57,12 +68,10 @@ class SESExtractionDataset(Dataset):
         }
 
 
-# 2. 学習
 def train():
-    tokenizer = BertTokenizerFast.from_pretrained(MODEL_NAME)
+    tokenizer = BertJapaneseTokenizer.from_pretrained(MODEL_NAME)
     model = BertForTokenClassification.from_pretrained(MODEL_NAME, num_labels=len(LABEL_LIST))
 
-    # Macならmps, Windowsならcuda
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model.to(device)
 

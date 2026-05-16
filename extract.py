@@ -1,7 +1,7 @@
 from CONST import LABEL_LIST
 import json
 import torch
-from transformers import BertTokenizerFast, BertForTokenClassification
+from transformers import BertJapaneseTokenizer, BertForTokenClassification
 
 MODEL_DIR = "./trained_model"
 
@@ -13,12 +13,56 @@ _device = None
 def _load():
     global _model, _tokenizer, _device
     if _model is None:
-        _tokenizer = BertTokenizerFast.from_pretrained(MODEL_DIR)
+        _tokenizer = BertJapaneseTokenizer.from_pretrained(MODEL_DIR)
         _model = BertForTokenClassification.from_pretrained(MODEL_DIR)
         _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         _model.to(_device)
         _model.eval()
     return _model, _tokenizer, _device
+
+
+def align_token_offsets(text, tokens):
+    """
+    Slow tokenizer は offset_mapping を返さないので、トークン列を原文と
+    手動でアラインして各トークンの (start, end) 文字位置を返す。
+    ##接頭辞は直前トークンの直後に続くものとして扱い、非##トークンの前は
+    空白読み飛ばし可とする。[UNK] は次の非空白1文字に対応とみなす。
+    アライン失敗時は None を返す。
+    """
+    offsets = []
+    pos = 0
+    for token in tokens:
+        if token == "[UNK]":
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+            if pos < len(text):
+                offsets.append((pos, pos + 1))
+                pos += 1
+            else:
+                offsets.append(None)
+            continue
+
+        is_subword = token.startswith("##")
+        clean = token[2:] if is_subword else token
+        if not clean:
+            offsets.append(None)
+            continue
+
+        if not is_subword:
+            while pos < len(text) and text[pos].isspace():
+                pos += 1
+
+        if text[pos:pos + len(clean)] == clean:
+            offsets.append((pos, pos + len(clean)))
+            pos += len(clean)
+        else:
+            idx = text.lower().find(clean.lower(), pos)
+            if idx == -1:
+                offsets.append(None)
+            else:
+                offsets.append((idx, idx + len(clean)))
+                pos = idx + len(clean)
+    return offsets
 
 
 def extract_to_json(text):
@@ -29,48 +73,57 @@ def extract_to_json(text):
         outputs = model(**inputs)
 
     predictions = torch.argmax(outputs.logits, dim=2).squeeze().tolist()
-    tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'].squeeze())
+    input_ids = inputs["input_ids"].squeeze().tolist()
+
+    raw_tokens = tokenizer.tokenize(text)
+    offsets = align_token_offsets(text, raw_tokens)
+
+    special_ids = {tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id}
 
     result_json = {}
-    current_entity = None
     current_label = None
+    current_start = None
+    current_end = None
 
-    for token, pred_id in zip(tokens, predictions):
-        if token in ["[CLS]", "[SEP]", "[PAD]"]:
+    def flush():
+        nonlocal current_label, current_start, current_end
+        if current_label and current_start is not None and current_label not in result_json:
+            result_json[current_label] = text[current_start:current_end]
+        current_label = None
+        current_start = None
+        current_end = None
+
+    token_idx = 0
+    for tid, pred_id in zip(input_ids, predictions):
+        if tid in special_ids:
+            flush()
             continue
+        if token_idx >= len(offsets):
+            break
 
+        offset = offsets[token_idx]
+        token_idx += 1
         label = LABEL_LIST[pred_id]
-        # ## を除去（サブワードの結合）
-        clean_token = token.replace('##', '')
+
+        if offset is None:
+            continue
+        start, end = offset
 
         if label.startswith("B-"):
-            new_label = label.split("-")[1]
-            # 同じラベルの B- が連続する場合は結合（途中で誤って B- に切り替わるケース対策）
-            if current_label == new_label and current_entity is not None:
-                current_entity += clean_token
+            new_label = label[2:]
+            if current_label == new_label and current_start is not None:
+                current_end = end
             else:
-                # 別ラベルへの遷移時は直前のエンティティを保存
-                if current_entity and current_label not in result_json:
-                    result_json[current_label] = current_entity
+                flush()
                 current_label = new_label
-                current_entity = clean_token
-        elif label.startswith("I-") and current_label == label.split("-")[1]:
-            # エンティティの継続
-            if current_entity is not None:
-                current_entity += clean_token
+                current_start = start
+                current_end = end
+        elif label.startswith("I-") and current_label == label[2:]:
+            current_end = end
         else:
-            # エンティティの終了
-            if current_entity:
-                # 既に同じラベルがあればリストにするか、最初に見つけたものを優先
-                if current_label not in result_json:
-                    result_json[current_label] = current_entity
-                current_entity = None
-                current_label = None
+            flush()
 
-    # 最後のエンティティを処理
-    if current_entity and current_label not in result_json:
-        result_json[current_label] = current_entity
-
+    flush()
     return result_json
 
 

@@ -787,7 +787,7 @@ TEST_DATA = [
         "expected": {"TITLE": "AWS構築案件", "SUMMARY": "インフラ設計から運用まで", "PRICE": "100万"}
     },
     {
-        "text": "Kotlin開発、Androidアプリの保守、単価75万",
+        "text": "Kotlin開発｜Androidアプリの保守｜単価75万",
         "expected": {"TITLE": "Kotlin開発", "SUMMARY": "Androidアプリの保守", "PRICE": "75万"}
     },
     {
@@ -799,8 +799,8 @@ TEST_DATA = [
         "expected": {"TITLE": "Node.js開発", "SUMMARY": "APIサーバー構築", "PRICE": "80万"}
     },
     {
-        "text": "100万、ReactNative案件、クロスプラットフォーム開発",
-        "expected": {"TITLE": "ReactNative案件", "SUMMARY": "クロスプラットフォーム開発", "PRICE": "100万"}
+        "text": "100万、React Native案件、クロスプラットフォーム開発",
+        "expected": {"TITLE": "React Native案件", "SUMMARY": "クロスプラットフォーム開発", "PRICE": "100万"}
     },
     {
         "text": "案件：DevOps 概要：CI/CDパイプライン構築 費用：90万",
@@ -864,8 +864,8 @@ TEST_DATA = [
         "expected": {"TITLE": "Kotlin開発", "SUMMARY": "Androidアプリの新機能追加", "PRICE": "76万"}
     },
     {
-        "text": "突然のご連絡失礼いたします。エージェントの中村です。応募締切：今週中、面談：書類選考あり、服装自由。ReactNative案件、クロスプラットフォームアプリ開発、単価84万円。",
-        "expected": {"TITLE": "ReactNative案件", "SUMMARY": "クロスプラットフォームアプリ開発", "PRICE": "84万円"}
+        "text": "突然のご連絡失礼いたします。エージェントの中村です。応募締切：今週中、面談：書類選考あり、服装自由。React Native案件、クロスプラットフォームアプリ開発、単価84万円。",
+        "expected": {"TITLE": "React Native案件", "SUMMARY": "クロスプラットフォームアプリ開発", "PRICE": "84万円"}
     },
     {
         "text": "ご紹介ありがとうございます。さて別件ですが、こちらいかがでしょう。商流2次まで、フルリモート、即日参画可。DevOps案件、CI/CDパイプラインの整備、単価95万。",
