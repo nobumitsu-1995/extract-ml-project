@@ -1,20 +1,20 @@
 # extract-ml-project
 
-日本語の SES 案件メール本文から **タイトル（TITLE）**・**概要（SUMMARY）**・**単価（PRICE）** を抽出する固有表現抽出（NER）プロジェクトです。
+日本語の 案件メールから **タイトル（TITLE）**・**概要（SUMMARY）**・**単価（PRICE）** を抽出する固有表現抽出（NER）プロジェクトです。
 
 東北大版 BERT (`cl-tohoku/bert-base-japanese-v3`) をファインチューニングし、BIO 形式（`O`, `B-TITLE`, `I-TITLE`, `B-SUMMARY`, `I-SUMMARY`, `B-PRICE`, `I-PRICE`）でトークン分類を行います。
 
 ## ファイル構成
 
-| ファイル | 役割 |
-| --- | --- |
-| `CONST.py` | 学習用データ `TRAIN_DATA` とテスト用データ `TEST_DATA`、ラベル定義 |
-| `main.py` | BERT ファインチューニング（学習）スクリプト |
-| `predict.py` | 学習済みモデルを使い、トークン単位の予測ラベルを表示 |
-| `extract.py` | 学習済みモデルを使い、抽出結果を JSON 形式で返す `extract_to_json()` 関数 |
-| `test.py` | `TEST_DATA` を使った精度評価スクリプト |
-| `requirements.txt` | 依存パッケージ |
-| `trained_model/` | 学習後に生成される学習済みモデル（gitignore 対象） |
+| ファイル           | 役割                                                                      |
+| ------------------ | ------------------------------------------------------------------------- |
+| `CONST.py`         | 学習用データ `TRAIN_DATA` とテスト用データ `TEST_DATA`、ラベル定義        |
+| `main.py`          | BERT ファインチューニング（学習）スクリプト                               |
+| `predict.py`       | 学習済みモデルを使い、トークン単位の予測ラベルを表示                      |
+| `extract.py`       | 学習済みモデルを使い、抽出結果を JSON 形式で返す `extract_to_json()` 関数 |
+| `test.py`          | `TEST_DATA` を使った精度評価スクリプト                                    |
+| `requirements.txt` | 依存パッケージ                                                            |
+| `trained_model/`   | 学習後に生成される学習済みモデル（gitignore 対象）                        |
 
 ## セットアップ
 
