@@ -30,4 +30,6 @@ def predict(text):
 
 
 if __name__ == "__main__":
-    predict("Ruby開発案件。現場は渋谷。単価は70万。")
+    predict("【急募】Swift開発 iOSアプリの新機能追加 単価80万円")
+    predict("Django開発 BtoC向けWebサービス構築 単価80万円")
+    predict("Vue.js開発案件 SPAの実装担当 費用65万")

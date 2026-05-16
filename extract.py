@@ -44,7 +44,9 @@ def extract_to_json(text):
         clean_token = token.replace('##', '')
 
         if label.startswith("B-"):
-            # 新しいエンティティの開始
+            # 新しいエンティティの開始（直前のエンティティが未保存なら保存）
+            if current_entity and current_label not in result_json:
+                result_json[current_label] = current_entity
             current_label = label.split("-")[1]
             current_entity = clean_token
         elif label.startswith("I-") and current_label == label.split("-")[1]:
