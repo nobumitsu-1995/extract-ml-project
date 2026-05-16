@@ -1,9 +1,9 @@
 from CONST import LABEL_MAP, TRAIN_DATA, LABEL_LIST
-from extract import align_token_offsets
+from extract import get_aligned_offsets
 import torch
 from torch.utils.data import DataLoader, Dataset
 from torch.optim import AdamW
-from transformers import BertJapaneseTokenizer, BertForTokenClassification
+from transformers import AutoTokenizer, AutoModelForTokenClassification
 
 MODEL_NAME = "cl-tohoku/bert-base-japanese-v3"
 MODEL_DIR = "./trained_model"
@@ -30,32 +30,24 @@ class SESExtractionDataset(Dataset):
                 for i in range(start + 1, start + len(sub_text)):
                     char_labels[i] = f"I-{label}"
 
-        encoding = self.tokenizer(
-            text,
+        tok_kwargs = dict(
             max_length=self.max_length,
             padding='max_length',
             truncation=True,
-            return_tensors="pt"
+            return_tensors="pt",
         )
-        input_ids = encoding['input_ids'].squeeze().tolist()
+        if self.tokenizer.is_fast:
+            tok_kwargs["return_offsets_mapping"] = True
+        encoding = self.tokenizer(text, **tok_kwargs)
 
-        raw_tokens = self.tokenizer.tokenize(text)
-        offsets = align_token_offsets(text, raw_tokens)
-
-        special_ids = {self.tokenizer.cls_token_id, self.tokenizer.sep_token_id, self.tokenizer.pad_token_id}
+        aligned = get_aligned_offsets(text, self.tokenizer, encoding)
 
         labels = []
-        token_idx = 0
-        for tid in input_ids:
-            if tid in special_ids:
+        for tid, off in aligned:
+            if off is None:
                 labels.append(-100)
                 continue
-            if token_idx >= len(offsets) or offsets[token_idx] is None:
-                labels.append(0)
-                token_idx += 1
-                continue
-            start, _ = offsets[token_idx]
-            token_idx += 1
+            start, _ = off
             if start < len(char_labels):
                 labels.append(LABEL_MAP.get(char_labels[start], 0))
             else:
@@ -69,8 +61,8 @@ class SESExtractionDataset(Dataset):
 
 
 def train():
-    tokenizer = BertJapaneseTokenizer.from_pretrained(MODEL_NAME)
-    model = BertForTokenClassification.from_pretrained(MODEL_NAME, num_labels=len(LABEL_LIST))
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
+    model = AutoModelForTokenClassification.from_pretrained(MODEL_NAME, num_labels=len(LABEL_LIST), trust_remote_code=True)
 
     device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model.to(device)

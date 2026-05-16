@@ -1,7 +1,7 @@
 from CONST import LABEL_LIST
 import json
 import torch
-from transformers import BertJapaneseTokenizer, BertForTokenClassification
+from transformers import AutoTokenizer, AutoModelForTokenClassification
 
 MODEL_DIR = "./trained_model"
 
@@ -13,26 +13,28 @@ _device = None
 def _load():
     global _model, _tokenizer, _device
     if _model is None:
-        _tokenizer = BertJapaneseTokenizer.from_pretrained(MODEL_DIR)
-        _model = BertForTokenClassification.from_pretrained(MODEL_DIR)
+        _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
+        _model = AutoModelForTokenClassification.from_pretrained(MODEL_DIR, trust_remote_code=True)
         _device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
         _model.to(_device)
         _model.eval()
     return _model, _tokenizer, _device
 
 
+def _special_ids(tokenizer):
+    ids = {getattr(tokenizer, n, None) for n in
+           ['cls_token_id', 'sep_token_id', 'pad_token_id', 'bos_token_id', 'eos_token_id']}
+    ids.discard(None)
+    return ids
+
+
 def align_token_offsets(text, tokens):
-    """
-    Slow tokenizer は offset_mapping を返さないので、トークン列を原文と
-    手動でアラインして各トークンの (start, end) 文字位置を返す。
-    ##接頭辞は直前トークンの直後に続くものとして扱い、非##トークンの前は
-    空白読み飛ばし可とする。[UNK] は次の非空白1文字に対応とみなす。
-    アライン失敗時は None を返す。
-    """
+    """Slow tokenizer 用に手動で (start,end) を求める。"""
     offsets = []
     pos = 0
+    sp_style = any(t.startswith("\u2581") for t in tokens)
     for token in tokens:
-        if token == "[UNK]":
+        if token in ("[UNK]", "<unk>"):
             while pos < len(text) and text[pos].isspace():
                 pos += 1
             if pos < len(text):
@@ -42,8 +44,20 @@ def align_token_offsets(text, tokens):
                 offsets.append(None)
             continue
 
-        is_subword = token.startswith("##")
-        clean = token[2:] if is_subword else token
+        if sp_style:
+            if token.startswith("\u2581"):
+                is_subword = False
+                clean = token[1:]
+            else:
+                is_subword = True
+                clean = token
+        else:
+            if token.startswith("##"):
+                is_subword = True
+                clean = token[2:]
+            else:
+                is_subword = False
+                clean = token
         if not clean:
             offsets.append(None)
             continue
@@ -52,7 +66,7 @@ def align_token_offsets(text, tokens):
             while pos < len(text) and text[pos].isspace():
                 pos += 1
 
-        if text[pos:pos + len(clean)] == clean:
+        if text[pos:pos + len(clean)].lower() == clean.lower():
             offsets.append((pos, pos + len(clean)))
             pos += len(clean)
         else:
@@ -65,20 +79,55 @@ def align_token_offsets(text, tokens):
     return offsets
 
 
+def get_aligned_offsets(text, tokenizer, encoding):
+    """input_ids と 1:1 で並ぶ (input_id, Optional[(start,end)]) のリスト。"""
+    input_ids = encoding['input_ids'].squeeze().tolist()
+    specials = _special_ids(tokenizer)
+    if tokenizer.is_fast and 'offset_mapping' in encoding:
+        raw = encoding['offset_mapping'].squeeze().tolist()
+        result = []
+        for tid, off in zip(input_ids, raw):
+            s, e = int(off[0]), int(off[1])
+            if tid in specials or s == e:
+                result.append((tid, None))
+                continue
+            while s < e and s < len(text) and text[s].isspace():
+                s += 1
+            if s == e:
+                result.append((tid, None))
+            else:
+                result.append((tid, (s, e)))
+        return result
+    raw_tokens = tokenizer.tokenize(text)
+    raw_offsets = align_token_offsets(text, raw_tokens)
+    result = []
+    token_idx = 0
+    for tid in input_ids:
+        if tid in specials:
+            result.append((tid, None))
+            continue
+        if token_idx >= len(raw_offsets):
+            result.append((tid, None))
+            continue
+        result.append((tid, raw_offsets[token_idx]))
+        token_idx += 1
+    return result
+
+
 def extract_to_json(text):
     model, tokenizer, device = _load()
 
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True).to(device)
+    tok_kwargs = dict(return_tensors="pt", truncation=True, padding=True)
+    if tokenizer.is_fast:
+        tok_kwargs["return_offsets_mapping"] = True
+    encoding = tokenizer(text, **tok_kwargs)
+
+    model_inputs = {k: v.to(device) for k, v in encoding.items() if k != 'offset_mapping'}
     with torch.no_grad():
-        outputs = model(**inputs)
+        outputs = model(**model_inputs)
 
     predictions = torch.argmax(outputs.logits, dim=2).squeeze().tolist()
-    input_ids = inputs["input_ids"].squeeze().tolist()
-
-    raw_tokens = tokenizer.tokenize(text)
-    offsets = align_token_offsets(text, raw_tokens)
-
-    special_ids = {tokenizer.cls_token_id, tokenizer.sep_token_id, tokenizer.pad_token_id}
+    aligned = get_aligned_offsets(text, tokenizer, encoding)
 
     result_json = {}
     current_label = None
@@ -93,21 +142,12 @@ def extract_to_json(text):
         current_start = None
         current_end = None
 
-    token_idx = 0
-    for tid, pred_id in zip(input_ids, predictions):
-        if tid in special_ids:
+    for (tid, off), pred_id in zip(aligned, predictions):
+        if off is None:
             flush()
             continue
-        if token_idx >= len(offsets):
-            break
-
-        offset = offsets[token_idx]
-        token_idx += 1
+        start, end = off
         label = LABEL_LIST[pred_id]
-
-        if offset is None:
-            continue
-        start, end = offset
 
         if label.startswith("B-"):
             new_label = label[2:]
